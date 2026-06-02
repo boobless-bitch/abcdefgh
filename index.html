@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinite Decision Canvas</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --grid-color: rgba(148, 163, 184, 0.05);
+            --line-color: #475569;
+            --root-color: #f59e0b;
+            --red-color: #f43f5e;
+            --blue-color: #0ea5e9;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --card-bg: #1e293b;
+            --btn-save: linear-gradient(135deg, #10b981, #059669);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            user-select: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+        }
+
+        /* Viewport acts as container for infinite zoom/pan space */
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+            overflow: hidden;
+            cursor: grab;
+            background-size: 24px 24px;
+            background-image: 
+                linear-gradient(to right, var(--grid-color) 1px, transparent 1px),
+                linear-gradient(to bottom, var(--grid-color) 1px, transparent 1px);
+        }
+
+        #canvas-container:active {
+            cursor: grabbing;
+        }
+
+        /* The actual canvas containing the tree hierarchy */
+        #canvas {
+            position: absolute;
+            transform-origin: 0 0;
+            width: max-content;
+            height: max-content;
+            padding: 100px; /* Space for dynamic tree expansion */
+        }
+
+        /* Smooth transition class toggled for button actions */
+        #canvas.smooth {
+            transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        /* Container wrapper for dynamic elements */
+        #tree-root-container {
+            display: inline-block;
+        }
+
+        /* CSS Tree Layout & Connections */
+        .tree-node-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+
+        /* Vertical branch line going down from parent */
+        .tree-node-wrapper::after {
+            content: '';
+            position: absolute;
+            bottom: -30px; /* Aligns with padding top of children container */
+            left: 50%;
+            width: 2px;
+            height: 30px;
+            background-color: var(--line-color);
+            transform: translateX(-50%);
+            z-index: 1;
+        }
+
+        /* Leaf nodes shouldn't have vertical lines going down */
+        .tree-node-wrapper.leaf::after {
+            display: none;
+        }
+
+        .tree-children {
+            display: flex;
+            justify-content: center;
+            position: relative;
+            padding-top: 30px;
+        }
+
+        .tree-child-wrapper {
+            position: relative;
+            padding: 30px 15px 0 15px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* Sibling bridging connectors */
+        .tree-child-wrapper::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background-color: var(--line-color);
+        }
+
+        /* Clip left and right overhang branches on outer child nodes */
+        .tree-child-wrapper:first-child::before {
+            left: 50%;
+            width: 50%;
+        }
+
+        .tree-child-wrapper:last-child::before {
+            right: 50%;
+            width: 50%;
+            left: auto;
+        }
+
+        /* Vertical drop line down into child node card */
+        .tree-child-wrapper::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            width: 2px;
+            height: 30px;
+            background-color: var(--line-color);
+            transform: translateX(-50%);
+        }
+
+        /* Node cards styling */
+        .node-card {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 16px;
+            width: 280px;
+            box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5);
+            border: 2px solid #334155;
+            z-index: 5;
+            pointer-events: auto; /* Ensures UI interaction works inside scaled container */
+            transition: box-shadow 0.2s, border-color 0.2s;
+        }
+
+        /* Branch-specific color indicators */
+        .node-card.root {
+            border-color: var(--root-color);
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.15), 0 10px 30px -10px rgba(0,0,0,0.5);
+        }
+
+        .node-card.red {
+            border-color: var(--red-color);
+            box-shadow: 0 0 15px rgba(244, 63, 94, 0.15), 0 10px 30px -10px rgba(0,0,0,0.5);
+        }
+
+        .node-card.blue {
+            border-color: var(--blue-color);
+            box-shadow: 0 0 15px rgba(14, 165, 233, 0.15), 0 10px 30px -10px rgba(0,0,0,0.5);
+        }
+
+        /* Node Interior Elements */
+        .node-header {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 700;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .node-header.root { color: var(--root-color); }
+        .node-header.red { color: var(--red-color); }
+        .node-header.blue { color: var(--blue-color); }
+
+        .node-text {
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--text-primary);
+            word-break: break-word;
+            margin-bottom: 12px;
+            white-space: pre-wrap;
+        }
+
+        textarea {
+            width: 100%;
+            background-color: #0f172a;
+            border: 1px solid #334155;
+            color: var(--text-primary);
+            border-radius: 6px;
+            padding: 8px;
+            font-size: 13px;
+            resize: vertical;
+            min-height: 60px;
+            max-height: 180px;
+            margin-bottom: 8px;
+            outline: none;
+            user-select: text; /* Enables typing */
+        }
+
+        textarea:focus {
+            border-color: #64748b;
+        }
+
+        /* Action Buttons */
+        button {
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 12px;
+            border: none;
+            border-radius: 6px;
+            transition: opacity 0.2s, background-color 0.2s;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        .save-btn {
+            width: 100%;
+            padding: 8px;
+            background: var(--btn-save);
+            color: #ffffff;
+        }
+
+        .edit-btn {
+            background-color: transparent;
+            border: 1px solid #475569;
+            color: var(--text-secondary);
+            padding: 4px 10px;
+        }
+
+        .edit-btn:hover {
+            color: var(--text-primary);
+            border-color: #64748b;
+        }
+
+        /* Persistent Navigation / Canvas UI Controls */
+        #ui-controls {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            display: flex;
+            gap: 8px;
+            background-color: rgba(30, 41, 59, 0.85);
+            padding: 8px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            z-index: 100;
+        }
+
+        .control-btn {
+            background-color: #334155;
+            color: var(--text-primary);
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .control-btn:hover {
+            background-color: #475569;
+        }
+
+        .control-btn[title]::after {
+            content: attr(title);
+            position: absolute;
+            bottom: 55px;
+            transform: translateX(-50%);
+            background: #1e293b;
+            color: #fff;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+            display: none;
+            border: 1px solid #334155;
+        }
+
+        .control-btn:hover::after {
+            display: block;
+        }
+
+        #app-info {
+            position: fixed;
+            top: 24px;
+            left: 24px;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        #app-info h1 {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        #app-info p {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* Utility helper class to reset persistent data */
+        #reset-app-btn {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            background-color: rgba(244, 63, 94, 0.15);
+            color: var(--red-color);
+            border: 1px solid rgba(244, 63, 94, 0.3);
+            padding: 8px 16px;
+            font-size: 12px;
+            z-index: 100;
+        }
+
+        #reset-app-btn:hover {
+            background-color: rgba(244, 63, 94, 0.25);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-info">
+        <h1>Nested Decision Canvas</h1>
+        <p>Drag background to Pan • Scroll to Zoom</p>
+    </div>
+
+    <button id="reset-app-btn" onclick="resetAllData()">Reset Tree</button>
+
+    <div id="canvas-container">
+        <div id="canvas">
+            <div id="tree-root-container"></div>
+        </div>
+    </div>
+
+    <!-- Interface HUD navigation buttons -->
+    <div id="ui-controls">
+        <button class="control-btn" onclick="zoomIn()" title="Zoom In">+</button>
+        <button class="control-btn" onclick="zoomOut()" title="Zoom Out">-</button>
+        <button class="control-btn" onclick="zoomToFit()" title="Fit Screen">🎯</button>
+        <button class="control-btn" onclick="resetCanvasPosition()" title="Center view">🔄</button>
+    </div>
+
+    <script>
+        // Configuration state management
+        const STORAGE_KEY = 'nested_decision_canvas_data';
+        
+        let treeData = loadData();
+        let panX = 100;
+        let panY = 100;
+        let zoomScale = 1.0;
+        let isDragging = false;
+        let startX, startY;
+        let smoothTransitionTimeout;
+
+        const container = document.getElementById('canvas-container');
+        const canvas = document.getElementById('canvas');
+
+        // Initial setup
+        window.onload = () => {
+            renderTree();
+            setTimeout(zoomToFit, 100); // Auto-fit perspective to size content on load
+        };
+
+        // --- Core Interaction & Recursion Node Rendering ---
+        function generateId() {
+            return 'node_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function renderTree() {
+            const rootContainer = document.getElementById('tree-root-container');
+            rootContainer.innerHTML = '';
+            rootContainer.appendChild(createNodeDOM(treeData));
+            saveData();
+        }
+
+        function createNodeDOM(node) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'tree-node-wrapper';
+
+            if (!node.saved) {
+                wrapper.classList.add('leaf');
+            }
+
+            const card = document.createElement('div');
+            card.className = `node-card ${node.color}`;
+
+            // Header path indication
+            const header = document.createElement('div');
+            header.className = `node-header ${node.color}`;
+            if (node.color === 'root') {
+                header.textContent = '📍 Core Question';
+            } else if (node.color === 'red') {
+                header.textContent = '🔴 RED PATH (IF)';
+            } else if (node.color === 'blue') {
+                header.textContent = '🔵 BLUE PATH (ELSE)';
+            }
+            card.appendChild(header);
+
+            // Conditional rendering dependent on node save state
+            if (!node.saved) {
+                const textarea = document.createElement('textarea');
+                textarea.placeholder = "Enter question or scenario description...";
+                textarea.value = node.text || '';
+                
+                // Allow input events to propagate so users can type and select text properly
+                textarea.onmousedown = (e) => e.stopPropagation();
+                textarea.onkeydown = (e) => e.stopPropagation();
+
+                const saveBtn = document.createElement('button');
+                saveBtn.className = 'save-btn';
+                saveBtn.textContent = 'Save & Draw Branches';
+                saveBtn.onclick = () => {
+                    if (textarea.value.trim() === '') return;
+                    node.text = textarea.value.trim();
+                    node.saved = true;
+                    renderTree();
+                    // Small delay to let DOM re-render before shifting canvas perspective
+                    setTimeout(zoomToFit, 50); 
+                };
+
+                card.appendChild(textarea);
+                card.appendChild(saveBtn);
+            } else {
+                const textDiv = document.createElement('div');
+                textDiv.className = 'node-text';
+                textDiv.textContent = node.text;
+
+                const editBtn = document.createElement('button');
+                editBtn.className = 'edit-btn';
+                editBtn.textContent = 'Edit Decision';
+                editBtn.onclick = () => {
+                    node.saved = false;
+                    renderTree();
+                };
+
+                card.appendChild(textDiv);
+                card.appendChild(editBtn);
+            }
+
+            wrapper.appendChild(card);
+
+            // Dynamically instantiate child branches as user locks decisions
+            if (node.saved) {
+                if (!node.red) {
+                    node.red = { id: generateId(), text: '', saved: false, color: 'red', red: null, blue: null };
+                }
+                if (!node.blue) {
+                    node.blue = { id: generateId(), text: '', saved: false, color: 'blue', red: null, blue: null };
+                }
+
+                const childrenContainer = document.createElement('div');
+                childrenContainer.className = 'tree-children';
+
+                const redChildWrapper = document.createElement('div');
+                redChildWrapper.className = 'tree-child-wrapper';
+                redChildWrapper.appendChild(createNodeDOM(node.red));
+
+                const blueChildWrapper = document.createElement('div');
+                blueChildWrapper.className = 'tree-child-wrapper';
+                blueChildWrapper.appendChild(createNodeDOM(node.blue));
+
+                childrenContainer.appendChild(redChildWrapper);
+                childrenContainer.appendChild(blueChildWrapper);
+
+                wrapper.appendChild(childrenContainer);
+            }
+
+            return wrapper;
+        }
+
+        // --- Infinite Canvas Pan and Zoom Control Systems ---
+        function updateTransform(smooth = false) {
+            if (smooth) {
+                canvas.classList.add('smooth');
+                clearTimeout(smoothTransitionTimeout);
+                smoothTransitionTimeout = setTimeout(() => {
+                    canvas.classList.remove('smooth');
+                }, 350);
+            } else {
+                canvas.classList.remove('smooth');
+            }
+            canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
+        }
+
+        // Zoom centered directly around user cursor
+        container.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomFactor = 0.08;
+            const oldScale = zoomScale;
+
+            if (e.deltaY < 0) {
+                zoomScale = Math.min(3.0, zoomScale + zoomFactor);
+            } else {
+                zoomScale = Math.max(0.15, zoomScale - zoomFactor);
+            }
+
+            const rect = container.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            panX = mouseX - (mouseX - panX) * (zoomScale / oldScale);
+            panY = mouseY - (mouseY - panY) * (zoomScale / oldScale);
+
+            updateTransform();
+        }, { passive: false });
+
+        // Standard Drag Panning Mechanics
+        container.addEventListener('mousedown', (e) => {
+            if (e.target.closest('input, textarea, button, .node-card')) return;
+            isDragging = true;
+            startX = e.clientX - panX;
+            startY = e.clientY - panY;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            panX = e.clientX - startX;
+            panY = e.clientY - startY;
+            updateTransform();
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        // Touch drag interactions for tablets/mobile standard interfaces
+        container.addEventListener('touchstart', (e) => {
+            if (e.target.closest('input, textarea, button, .node-card') || e.touches.length > 1) return;
+            isDragging = true;
+            const touch = e.touches[0];
+            startX = touch.clientX - panX;
+            startY = touch.clientY - startY;
+        }, { passive: true });
+
+        window.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            const touch = e.touches[0];
+            panX = touch.clientX - startX;
+            panY = touch.clientY - startY;
+            updateTransform();
+        }, { passive: true });
+
+        window.addEventListener('touchend', () => {
+            isDragging = false;
+        });
+
+        // Navigation HUD Button triggers
+        function zoomIn() {
+            adjustViewScale(1.2);
+        }
+
+        function zoomOut() {
+            adjustViewScale(1 / 1.2);
+        }
+
+        function adjustViewScale(factor) {
+            const centerX = container.clientWidth / 2;
+            const centerY = container.clientHeight / 2;
+            const oldScale = zoomScale;
+            
+            zoomScale = Math.max(0.15, Math.min(3.0, zoomScale * factor));
+            panX = centerX - (centerX - panX) * (zoomScale / oldScale);
+            panY = centerY - (centerY - panY) * (zoomScale / oldScale);
+            
+            updateTransform(true);
+        }
+
+        function resetCanvasPosition() {
+            const rootContainer = document.getElementById('tree-root-container');
+            if (!rootContainer) return;
+
+            zoomScale = 1.0;
+            panX = (container.clientWidth - rootContainer.offsetWidth) / 2;
+            panY = 120; // Default vertical positioning margin
+            updateTransform(true);
+        }
+
+        // Calculations to scale and position complete canvas structure in container
+        function zoomToFit() {
+            const rootContainer = document.getElementById('tree-root-container');
+            if (!rootContainer || !rootContainer.firstElementChild) return;
+
+            const viewportWidth = container.clientWidth;
+            const viewportHeight = container.clientHeight;
+
+            // Compute actual visual boundaries of overall structural contents
+            const treeEl = rootContainer.firstElementChild;
+            const contentWidth = treeEl.scrollWidth + 200; // Left-Right safe boundaries
+            const contentHeight = treeEl.scrollHeight + 200; // Top-Bottom safe boundaries
+
+            const scaleX = viewportWidth / contentWidth;
+            const scaleY = viewportHeight / contentHeight;
+
+            let targetScale = Math.min(scaleX, scaleY);
+            targetScale = Math.max(0.18, Math.min(targetScale, 1.1)); // Keep boundaries functional
+
+            zoomScale = targetScale;
+            
+            // Re-align and horizontal center canvas element container
+            panX = (viewportWidth - (treeEl.scrollWidth * zoomScale)) / 2;
+            panY = 100; // Standard top alignment offset for hierarchical tree displays
+
+            updateTransform(true);
+        }
+
+        // --- Data Persistence Layer ---
+        function loadData() {
+            const localData = localStorage.getItem(STORAGE_KEY);
+            if (localData) {
+                try {
+                    return JSON.parse(localData);
+                } catch (e) {
+                    console.error("Local Storage corrupt. Rebuilding tree initialization.", e);
+                }
+            }
+            return {
+                id: 'root',
+                text: '',
+                saved: false,
+                color: 'root',
+                red: null,
+                blue: null
+            };
+        }
+
+        function saveData() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(treeData));
+        }
+
+        function resetAllData() {
+            if (confirm("Are you sure you want to delete your entire decision tree?")) {
+                localStorage.removeItem(STORAGE_KEY);
+                treeData = {
+                    id: 'root',
+                    text: '',
+                    saved: false,
+                    color: 'root',
+                    red: null,
+                    blue: null
+                };
+                renderTree();
+                resetCanvasPosition();
+            }
+        }
+    </script>
+</body>
+</html>
